@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fuzev-runtime"
+dynamic = ["version"]
+description = "FuZev decision head runtime and SystemOne adapter"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{name = "Peisong Xiao"}]
+dependencies = ["torch>=2.6", "safetensors>=0.5", "pydantic>=2.5", "pillow>=9.1", "typing-extensions>=4.6", "starlette>=0.27"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "numpy"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
+
+[tool.setuptools.package-data]
+fuzev = ["templates/*.jinja"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

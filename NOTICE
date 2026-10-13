@@ -1,0 +1,15 @@
+FuZev Runtime
+Copyright 2026 Peisong Xiao
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The supplied decision encoding follows the Qwen ChatML format.
+
+Bundled Qwen fixed chat template v22.3: Frederic Guigand (froggeric),
+Juan Calderon-Perez and contributors, under Apache-2.0.
+Source revision: 3be7669fac73085a458e20e81ee9dc5c322aefb2
+https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates
+
+Qwen3.8-Flash-Next backbone: Qwen team, Qwen Community License 1.0.
+https://huggingface.co/Qwen/Qwen3.8-Flash-Next/blob/main/LICENSE
+Training and evaluation dataset credits and separate license terms are listed
+in the FuZev attribution file: https://github.com/PeisongXiao/fuzev/blob/main/NOTICE
