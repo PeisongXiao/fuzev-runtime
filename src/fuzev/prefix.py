@@ -21,6 +21,8 @@ class Prefix:
 
 class PrefixRegistry:
     def __init__(self, *, capacity=DEFAULT_PREFIX_CAPACITY):
+        if capacity < 1:
+            raise ValueError("Prefix capacity must be at least 1")
         self.capacity = capacity
         self.entries = OrderedDict()
         self.lock = threading.RLock()

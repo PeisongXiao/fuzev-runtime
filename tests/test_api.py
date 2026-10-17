@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
+from starlette.datastructures import Headers
 
 from fuzev.api import APIError, api_error, models_response, request_id, validate_decision, validation_error
 from fuzev.contracts import DecisionRequest
@@ -70,11 +71,15 @@ def test_decision_accepts_an_optional_client_alias(head):
 
 
 def test_request_id_header_is_optional_and_preserved():
-    assert request_id({"X-TypeSafe-Request-ID": "job.A:1_b-c"}) == "job.A:1_b-c"
-    generated = request_id({})
+    assert request_id(Headers({"X-TypeSafe-Request-ID": "job.A:1_b-c"})) == "job.A:1_b-c"
+    generated = request_id(Headers())
     assert isinstance(generated, str) and generated
+
+
+@pytest.mark.parametrize("values", [[b"has spaces"], [b""], [b"one", b"two"]])
+def test_invalid_request_id_headers(values):
     with pytest.raises(APIError) as error:
-        request_id({"X-TypeSafe-Request-ID": "has spaces"})
+        request_id(Headers(raw=[(b"x-typesafe-request-id", value) for value in values]))
     status, body = api_error(error.value)
     assert status == 422
     assert body["detail"][0]["loc"] == ["header", "x-typesafe-request-id"]

@@ -4,10 +4,8 @@ import math
 import pytest
 from pydantic import ValidationError
 
-from fuzev.api import APIError, api_error
+from fuzev.api import api_error
 from fuzev.systemone import SystemOneAdapter, SystemOneRequest
-
-ALL = ("choice", "noul", "ordinal")
 
 
 class Decisions:
@@ -37,7 +35,7 @@ class Decisions:
                 }
                 for candidate, value in zip(request.candidates, values)
             ],
-            "execution": {"submitted_tokens": 17},
+            "execution": {"submitted_tokens": 17, "input_tokens": 9},
         }
 
 
@@ -72,7 +70,7 @@ def request(**changes):
 
 def test_kev_encoding_and_golden_answers():
     backend = Decisions({"choice": [0.2, 0.8], "noul": [0.9, 0.1], "ordinal": [0.1, 0.2, 0.7]})
-    adapter = SystemOneAdapter(backend, "custom-finetune", lambda text: 23, max_options=3, primitives=ALL)
+    adapter = SystemOneAdapter(backend, "custom-finetune", lambda text: 23)
     result = asyncio.run(adapter.answer(request()))
     calls = {call.primitive: call for call, _ in backend.calls}
     assert all(call.question == "" for call in calls.values())
@@ -110,7 +108,7 @@ def test_kev_encoding_and_golden_answers():
             "probabilities": {"0": 0.1, "1": 0.2, "2": 0.7},
         },
     }
-    assert result["usage"] == {"input_tokens": 51, "output_tokens": 23}
+    assert result["usage"] == {"input_tokens": 27, "output_tokens": 23}
     assert result["latency_ms"] >= 0
 
 
@@ -123,7 +121,7 @@ def test_aliases_and_unknown_fields_with_retained_prefix():
     )
     backend = Decisions()
     result = asyncio.run(
-        SystemOneAdapter(backend, "actual-model", len, max_options=2, primitives=ALL).answer(req)
+        SystemOneAdapter(backend, "actual-model", len).answer(req)
     )
     call, _ = backend.calls[0]
     assert result["model"] == call.model == "actual-model"
@@ -135,6 +133,16 @@ def test_aliases_and_unknown_fields_with_retained_prefix():
     assert call.additional_context == "Additional evidence"
 
 
+def test_score_legend_scalar_values_use_kev_text():
+    req = request(questions={"rating": {"type": "score", "criteria": [None, True, 3, 2.5]}})
+    result = asyncio.run(SystemOneAdapter(Decisions(), "model", len).answer(req))
+    assert result["answers"]["rating"] == {
+        "type": "score", "score": 1.5, "confidence": 0.0,
+        "legend": {"0": "", "1": "True", "2": "3", "3": "2.5"},
+        "probabilities": {"0": 0.25, "1": 0.25, "2": 0.25, "3": 0.25},
+    }
+
+
 @pytest.mark.parametrize("kind,criteria", [
     ("choice", {"only": None}), ("score", ["only"]), ("score", "wrong type"),
 ])
@@ -144,28 +152,6 @@ def test_known_criteria_remain_validated(kind, criteria):
     status, body = api_error(error.value)
     assert status == 422
     assert body["detail"][0]["loc"][-1] == "criteria"
-
-
-@pytest.mark.parametrize("kind", ["choice", "score"])
-def test_option_ceiling_uses_the_head_setting(kind):
-    head_config = {"max_options": 17}
-    backend = Decisions()
-    adapter = SystemOneAdapter(backend, "actual-model", len, max_options=head_config["max_options"], primitives=ALL)
-
-    def options(count):
-        criteria = [str(index) for index in range(count)]
-        if kind == "choice":
-            criteria = dict.fromkeys(criteria)
-        return request(questions={"q": {"type": kind, "criteria": criteria}})
-
-    for count in (2, head_config["max_options"]):
-        result = asyncio.run(adapter.answer(options(count)))
-        assert len(result["answers"]["q"]["probabilities"]) == count
-    with pytest.raises(APIError) as error:
-        asyncio.run(adapter.answer(options(head_config["max_options"] + 1)))
-    status, body = api_error(error.value)
-    assert status == 422
-    assert body["detail"][0]["loc"] == ["body", "questions", "q", kind, "criteria"]
 
 
 def test_independent_questions_are_submitted_concurrently():
@@ -181,7 +167,7 @@ def test_independent_questions_are_submitted_concurrently():
             await all_started.wait()
             return await backend(decision, identity)
 
-        adapter = SystemOneAdapter(decide, "actual-model", len, max_options=3, primitives=ALL)
+        adapter = SystemOneAdapter(decide, "actual-model", len)
         result = await asyncio.wait_for(adapter.answer(request()), timeout=2)
         assert list(result["answers"]) == ["team", "urgent", "rating"]
 
@@ -206,19 +192,10 @@ def test_question_failure_cancels_siblings():
                 cancelled.add(decision.primitive)
                 raise
 
-        adapter = SystemOneAdapter(decide, "actual-model", len, max_options=3, primitives=ALL)
+        adapter = SystemOneAdapter(decide, "actual-model", len)
         with pytest.raises(ExceptionGroup) as error:
             await asyncio.wait_for(adapter.answer(request()), timeout=2)
         assert cancelled == {"choice", "ordinal"}
         assert api_error(error.value) == (500, {"detail": "Internal server error"})
 
     asyncio.run(exercise())
-
-
-def test_all_question_primitives_validate_before_work_starts():
-    backend = Decisions()
-    adapter = SystemOneAdapter(backend, "model", len, max_options=3, primitives=("choice",))
-    with pytest.raises(APIError) as error:
-        asyncio.run(adapter.answer(request()))
-    assert error.value.detail[0]["loc"] == ["body", "questions", "urgent", "type"]
-    assert backend.calls == []

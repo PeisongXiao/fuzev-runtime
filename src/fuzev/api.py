@@ -11,6 +11,8 @@ from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from .encoding import LABEL_CAPACITY
+
 
 class APIError(Exception):
     def __init__(self, status, detail):
@@ -47,8 +49,7 @@ def api_error(error):
 
 
 def request_id(headers):
-    values = headers.getlist("x-typesafe-request-id") if hasattr(headers, "getlist") else [
-        value for key, value in headers.items() if key.lower() == "x-typesafe-request-id"]
+    values = headers.getlist("x-typesafe-request-id")
     if not values:
         return "req_" + uuid4().hex
     if len(values) != 1 or re.fullmatch(r"[A-Za-z0-9._:-]+", values[0]) is None:
@@ -57,11 +58,20 @@ def request_id(headers):
     return values[0]
 
 
-def validate_decision(request, head):
-    if len(request.candidates) > head.max_options:
-        raise validation_error("candidates", f"This head supports at most {head.max_options} options")
+def validate_decision(request, head, *, modality="text", candidate_field="candidates",
+                      primitive_field="primitive"):
     if request.primitive not in head.primitives:
-        raise validation_error("primitive", "This head does not support the requested primitive")
+        raise validation_error(primitive_field, "This head does not support the requested primitive")
+    if getattr(head, "is_v2", False):
+        capacity = head.capacities[request.primitive].get(modality)
+        if capacity is None:
+            raise validation_error("image", "This head does not support the requested modality")
+        maximum = capacity["implemented_max"]
+    else:
+        maximum = head.max_options
+    if len(request.candidates) > maximum:
+        raise validation_error(candidate_field, f"This head supports at most {maximum} options")
+    return "label_free" if getattr(head, "is_v2", False) and len(request.candidates) > LABEL_CAPACITY else "labelled"
 
 
 async def parse_body(http, schema):
@@ -77,7 +87,6 @@ def add_decision_route(app, respond, submit):
         async def operation(service, key):
             if service.head is None:
                 raise APIError(404, "No decision head is loaded")
-            validate_decision(request, service.head)
             return await submit(service, request, key)
         return await respond(http, operation)
 

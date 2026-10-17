@@ -1,7 +1,6 @@
 """Jev-compatible questions and answers using the evaluated decision encoding."""
 
 import asyncio
-import copy
 import json
 import time
 from typing import Annotated, Literal
@@ -9,7 +8,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from .api import APIError, validation_error
+from .api import APIError
 from .contracts import Candidate, DEFAULT_HEAD_ID, Primitive
 from .service_contracts import ServiceDecisionRequest
 
@@ -103,34 +102,24 @@ def answer(question, values, selected):
                      / uniform_deviation)
     return {"type": "score", "score": sum(index * p for index, p in enumerate(values)),
             "confidence": confidence,
-            "legend": {str(index): copy.deepcopy(level) if isinstance(level, (str, dict, list))
+            "legend": {str(index): level if isinstance(level, (str, dict, list))
                        else state_text(level) for index, level in enumerate(question.criteria)},
             "probabilities": {str(index): p for index, p in enumerate(values)}}
 
 
 def input_tokens(response):
-    return response["execution"]["submitted_tokens"]
+    return response["execution"]["input_tokens"]
 
 
 class SystemOneAdapter:
     """Submit independent questions through the configured decision service."""
 
-    def __init__(self, decide, model_name, token_count, head_id=DEFAULT_HEAD_ID, *, max_options,
-                 primitives):
+    def __init__(self, decide, model_name, token_count, head_id=DEFAULT_HEAD_ID):
         self.decide, self.model_name, self.token_count = decide, model_name, token_count
-        self.head_id, self.max_options = head_id, max_options
-        self.primitives = primitives
+        self.head_id = head_id
 
     async def answer(self, request, *, prepare=None):
         started = time.perf_counter()
-        for key, question in request.questions.items():
-            primitive = "ordinal" if question.type == "score" else question.type
-            if primitive not in self.primitives:
-                raise validation_error(["questions", key, "type"], "This head does not support the requested primitive")
-            count = 2 if question.type == "noul" else len(question.criteria)
-            if count > self.max_options:
-                raise validation_error(["questions", key, question.type, "criteria"],
-                                       f"This head supports at most {self.max_options} options")
         state = state_text(request.state)
         prepared = [decision_request(request, question, self.model_name, self.head_id, state)
                     for question in request.questions.values()]
